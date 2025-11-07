@@ -1,0 +1,770 @@
+# -*- coding: utf-8 -*-
+import subprocess
+import re
+import platform
+import ctypes
+import sys
+import os
+import time
+import locale
+import winreg
+
+class WindowsActivationManager:
+    def __init__(self):
+        self.admin = self.is_admin()
+        self.running = True
+        self.setup_encoding()
+        self.show_disclaimer()
+        
+    def setup_encoding(self):
+        """设置编码以解决乱码问题"""
+        try:
+            os.system('chcp 65001 > nul')
+            if hasattr(sys.stdout, 'reconfigure'):
+                sys.stdout.reconfigure(encoding='utf-8')
+        except:
+            pass
+        self.encoding = locale.getpreferredencoding() or 'gbk'
+        
+    def show_disclaimer(self):
+        """显示免责声明"""
+        self.clear_screen()
+        print("=" * 70)
+        print("                   免责声明")
+        print("=" * 70)
+        print()
+        print("重要提示：")
+        print("1. 本程序仅供学习和研究目的使用")
+        print("2. 请确保您拥有合法的Windows许可证")
+        print("3. 使用KMS激活仅适用于拥有合法批量许可证的环境")
+        print("4. 非法激活Windows可能违反法律法规")
+        print("5. 使用者应对其行为承担全部法律责任")
+        print("6. 开发者不承担任何因滥用本程序导致的法律责任")
+        print()
+        print("继续使用本程序即表示您已阅读并同意以上条款")
+        print()
+        
+        try:
+            input("按Enter键接受免责声明并继续...")
+        except:
+            pass
+    
+    def is_admin(self):
+        """检查是否以管理员权限运行"""
+        try:
+            return ctypes.windll.shell32.IsUserAnAdmin()
+        except:
+            return False
+    
+    def clear_screen(self):
+        """清屏"""
+        os.system('cls' if os.name == 'nt' else 'clear')
+    
+    def print_header(self):
+        """打印标题"""
+        self.clear_screen()
+        print("=" * 60)
+        print("       Windows Activation Management Tool")
+        print("=" * 60)
+        print()
+        
+        if self.admin:
+            print("[√] 当前以管理员权限运行")
+        else:
+            print("[!] 当前未以管理员权限运行，部分功能可能受限")
+        print()
+    
+    def get_system_tool_path(self, tool_name):
+        """获取系统工具完整路径"""
+        windir = os.environ.get('WINDIR', 'C:\\Windows')
+        possible_paths = [
+            os.path.join(windir, 'System32', tool_name),
+            os.path.join(windir, 'SysWOW64', tool_name),
+            os.path.join(windir, 'system32', tool_name),
+        ]
+        
+        for path in possible_paths:
+            if os.path.exists(path):
+                return path
+        return tool_name
+    
+    def run_command(self, cmd, show_output=True):
+        """执行命令并返回输出"""
+        try:
+            result = subprocess.run(
+                cmd, 
+                capture_output=True, 
+                text=True, 
+                shell=True, 
+                encoding=self.encoding,
+                errors='replace'
+            )
+            output = result.stdout
+            if show_output and output.strip():
+                for line in output.split('\n'):
+                    if line.strip():
+                        print(f"  {line.strip()}")
+            return output
+        except Exception as e:
+            error_msg = f"执行命令出错: {str(e)}"
+            if show_output:
+                print(f"  [错误] {error_msg}")
+            return error_msg
+    
+    def run_slmgr_command(self, args, show_output=True):
+        """运行slmgr命令"""
+        slmgr_path = self.get_system_tool_path('slmgr.vbs')
+        cscript_path = self.get_system_tool_path('cscript.exe')
+        
+        cmd = f'"{cscript_path}" //nologo "{slmgr_path}" {args}'
+        return self.run_command(cmd, show_output)
+    
+    def run_wmic_command(self, args, show_output=True):
+        """运行WMIC命令"""
+        wmic_path = self.get_system_tool_path('wmic.exe')
+        cmd = f'"{wmic_path}" {args}'
+        return self.run_command(cmd, show_output)
+    
+    def run_powershell_command(self, args, show_output=True):
+        """运行PowerShell命令"""
+        powershell_path = self.get_system_tool_path('powershell.exe')
+        cmd = f'"{powershell_path}" {args}'
+        return self.run_command(cmd, show_output)
+    
+    def check_activation_status(self):
+        """检查激活状态"""
+        print("[激活状态检测]")
+        
+        # 使用slmgr命令检测
+        print("1. 使用slmgr命令检测:")
+        self.run_slmgr_command("/dli")
+        
+        print("\n2. 许可证详细信息:")
+        self.run_slmgr_command("/dlv")
+        
+        print("\n3. 激活过期时间:")
+        self.run_slmgr_command("/xpr")
+        
+        # 使用WMIC获取基本信息
+        print("\n4. 系统信息:")
+        try:
+            output = self.run_wmic_command('os get caption,version /format:value', False)
+            if output:
+                for line in output.split('\n'):
+                    if '=' in line:
+                        key, value = line.split('=', 1)
+                        print(f"  {key.strip()}: {value.strip()}")
+        except:
+            pass
+        
+        print()
+    
+    def get_oem_info(self):
+        """获取OEM信息 - 增强版本"""
+        print("[OEM信息查询]")
+        
+        found_key = False
+        
+        # 方法1: 使用PowerShell获取OA3xOriginalProductKey
+        print("1. 使用PowerShell查询OEM密钥:")
+        try:
+            ps_cmd = '(Get-WmiObject -Query "SELECT * FROM SoftwareLicensingService").OA3xOriginalProductKey'
+            output = self.run_powershell_command(f'-Command "{ps_cmd}"', False)
+            if output and len(output.strip()) > 10:
+                key = output.strip()
+                print(f"  OEM产品密钥: {key}")
+                found_key = True
+            else:
+                print("  未找到OEM产品密钥 (方法1)")
+        except Exception as e:
+            print(f"  PowerShell查询失败: {e}")
+        
+        # 方法2: 使用WMIC查询OEM密钥
+        if not found_key:
+            print("\n2. 使用WMIC查询OEM密钥:")
+            try:
+                output = self.run_wmic_command('path softwarelicensingservice get OA3xOriginalProductKey /format:value', False)
+                if output and 'OA3xOriginalProductKey' in output:
+                    for line in output.split('\n'):
+                        if 'OA3xOriginalProductKey=' in line:
+                            key = line.split('=', 1)[1].strip()
+                            if len(key) > 10:
+                                print(f"  OEM产品密钥: {key}")
+                                found_key = True
+                                break
+                if not found_key:
+                    print("  未找到OEM产品密钥 (方法2)")
+            except Exception as e:
+                print(f"  WMIC查询失败: {e}")
+        
+        # 方法3: 从注册表读取
+        if not found_key:
+            print("\n3. 从注册表查询OEM信息:")
+            try:
+                # 尝试读取DigitalProductId
+                key_path = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+                try:
+                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path) as key:
+                        try:
+                            product_id, _ = winreg.QueryValueEx(key, "ProductId")
+                            if product_id and len(product_id) > 10:
+                                print(f"  产品ID: {product_id}")
+                        except FileNotFoundError:
+                            pass
+                        
+                        try:
+                            digital_product_id, _ = winreg.QueryValueEx(key, "DigitalProductId")
+                            if digital_product_id:
+                                print("  找到DigitalProductId (需要解码)")
+                        except FileNotFoundError:
+                            pass
+                except Exception as e:
+                    print(f"  注册表读取失败: {e}")
+            except Exception as e:
+                print(f"  注册表查询失败: {e}")
+        
+        # 方法4: 使用系统信息命令
+        print("\n4. 系统制造商信息:")
+        try:
+            # 获取计算机制造商和型号
+            output = self.run_wmic_command('computersystem get manufacturer,model /format:value', False)
+            if output:
+                for line in output.split('\n'):
+                    if '=' in line:
+                        key, value = line.split('=', 1)
+                        print(f"  {key.strip()}: {value.strip()}")
+        except Exception as e:
+            print(f"  获取系统信息失败: {e}")
+        
+        # 方法5: 获取BIOS信息
+        print("\n5. BIOS信息:")
+        try:
+            output = self.run_wmic_command('bios get manufacturer,serialnumber,version /format:value', False)
+            if output:
+                for line in output.split('\n'):
+                    if '=' in line:
+                        key, value = line.split('=', 1)
+                        print(f"  {key.strip()}: {value.strip()}")
+        except Exception as e:
+            print(f"  获取BIOS信息失败: {e}")
+        
+        if not found_key:
+            print("\n[提示] 未找到OEM产品密钥，可能的原因:")
+            print("  - 此设备不是OEM设备")
+            print("  - 系统已重新安装，OEM信息丢失")
+            print("  - 当前用户权限不足")
+        
+        print()
+
+    def show_installed_product_keys(self):
+        """显示已安装的产品密钥"""
+        print("[已安装的产品密钥]")
+        print()
+        
+        # 方法1: 使用slmgr命令显示密钥信息
+        print("1. 使用slmgr命令查询:")
+        output = self.run_slmgr_command("/dli", False)
+        
+        # 尝试从输出中提取密钥信息
+        lines = output.split('\n')
+        key_found = False
+        
+        for line in lines:
+            line_lower = line.lower()
+            if 'product key' in line_lower or '产品密钥' in line or 'partial product key' in line_lower:
+                print(f"  {line.strip()}")
+                key_found = True
+        
+        # 方法2: 使用PowerShell查询更详细的信息
+        print("\n2. 使用PowerShell查询:")
+        try:
+            ps_cmd = 'Get-WmiObject -Query "SELECT * FROM SoftwareLicensingService" | Select-Object OA3xOriginalProductKey, Version, MachineName'
+            output = self.run_powershell_command(f'-Command "{ps_cmd}"', False)
+            if output and 'OA3xOriginalProductKey' in output:
+                for line in output.split('\n'):
+                    if line.strip() and not line.strip().startswith('OA3x'):
+                        print(f"  {line.strip()}")
+                        key_found = True
+        except Exception as e:
+            print(f"  PowerShell查询失败: {e}")
+        
+        # 方法3: 查询Windows安装的密钥
+        print("\n3. 查询Windows安装密钥:")
+        try:
+            ps_cmd = '(Get-WmiObject -Query "SELECT * FROM SoftwareLicensingProduct WHERE PartialProductKey <> null").PartialProductKey'
+            output = self.run_powershell_command(f'-Command "{ps_cmd}"', False)
+            if output and output.strip():
+                keys = [k.strip() for k in output.split('\n') if k.strip()]
+                for key in keys:
+                    if len(key) > 5:
+                        print(f"  部分产品密钥: {key}*****")
+                        key_found = True
+        except Exception as e:
+            print(f"  查询安装密钥失败: {e}")
+        
+        # 方法4: 从注册表读取
+        print("\n4. 从注册表查询:")
+        try:
+            key_paths = [
+                r"SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+                r"SOFTWARE\Microsoft\Windows\CurrentVersion\Setup\OOBE"
+            ]
+            
+            for key_path in key_paths:
+                try:
+                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path) as key:
+                        i = 0
+                        while True:
+                            try:
+                                name, value, type_ = winreg.EnumValue(key, i)
+                                if any(kw in name.lower() for kw in ['key', 'productkey', 'digitalproductid']):
+                                    if value and len(str(value)) > 10:
+                                        # 对实际密钥进行部分隐藏
+                                        if 'productkey' in name.lower() and len(str(value)) > 15:
+                                            masked_value = str(value)[:20] + "*****"
+                                            print(f"  {name}: {masked_value}")
+                                        else:
+                                            print(f"  {name}: {value}")
+                                        key_found = True
+                                i += 1
+                            except WindowsError:
+                                break
+                except FileNotFoundError:
+                    pass
+                except Exception as e:
+                    print(f"  读取注册表路径 {key_path} 失败: {e}")
+        except Exception as e:
+            print(f"  注册表查询失败: {e}")
+        
+        if not key_found:
+            print("  未找到已安装的产品密钥信息")
+        
+        print("\n[提示]")
+        print("  - 出于安全考虑，完整密钥通常不会直接显示")
+        print("  - 如果显示部分密钥(*****)，表示系统中有密钥但被隐藏")
+        print("  - OEM设备通常有嵌入BIOS的密钥")
+        print()
+
+    def validate_product_key(self, key):
+        """验证产品密钥格式"""
+        pattern = r'^[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}$'
+        return re.match(pattern, key.upper()) is not None
+
+    def install_product_key(self):
+        """安装产品密钥"""
+        print("[安装产品密钥]")
+        
+        if not self.admin:
+            print("[错误] 此操作需要管理员权限，请以管理员身份重新运行程序")
+            print()
+            return False
+        
+        print("请输入有效的Windows产品密钥 (格式: XXXXX-XXXXX-XXXXX-XXXXX-XXXXX)")
+        print("或直接按Enter取消操作")
+        print()
+        
+        while True:
+            try:
+                product_key = input("产品密钥: ").strip().upper()
+                
+                if not product_key:
+                    print("取消安装")
+                    return False
+                    
+                if self.validate_product_key(product_key):
+                    break
+                else:
+                    print("密钥格式不正确，请重新输入")
+                    print()
+            except UnicodeDecodeError:
+                print("输入编码错误，请重新输入")
+            except Exception as e:
+                print(f"输入错误: {str(e)}")
+        
+        print()
+        print(f"将要安装的密钥: {product_key[:24]}*****")
+        try:
+            confirm = input("确认安装? (y/N): ").strip().lower()
+        except:
+            confirm = 'n'
+        
+        if confirm != 'y':
+            print("取消安装")
+            return False
+        
+        print()
+        print("正在安装产品密钥...")
+        result = self.run_slmgr_command(f"/ipk {product_key}", False)
+        
+        if "成功" in result or "successfully" in result.lower():
+            print("[成功] 产品密钥安装成功")
+            return True
+        else:
+            print(f"[错误] 产品密钥安装失败: {result}")
+            return False
+
+    def activate_windows(self):
+        """激活Windows"""
+        print("[激活Windows]")
+        
+        if not self.admin:
+            print("[错误] 此操作需要管理员权限，请以管理员身份重新运行程序")
+            print()
+            return False
+        
+        try:
+            confirm = input("确认要尝试激活Windows吗? (y/N): ").strip().lower()
+        except:
+            confirm = 'n'
+            
+        if confirm != 'y':
+            print("取消激活")
+            return False
+        
+        print()
+        print("正在尝试激活Windows...")
+        result = self.run_slmgr_command("/ato", False)
+        
+        if "成功" in result or "successfully" in result.lower() or "已激活" in result:
+            print("[成功] Windows激活成功")
+            return True
+        else:
+            print(f"[警告] 激活结果: {result}")
+            return False
+    
+    def kms_activation(self):
+        """KMS激活Windows"""
+        print("[KMS激活]")
+        print()
+        
+        # 显示KMS激活免责声明
+        print("重要提醒:")
+        print("1. KMS激活仅适用于拥有合法批量许可证的环境")
+        print("2. 请确保您拥有使用KMS激活的合法权利")
+        print("3. 非法使用KMS激活可能违反法律法规")
+        print("4. 使用此功能即表示您了解并承担相应责任")
+        print()
+        
+        try:
+            confirm = input("我已阅读并理解上述提醒，确认继续? (y/N): ").strip().lower()
+        except:
+            confirm = 'n'
+            
+        if confirm != 'y':
+            print("取消KMS激活")
+            return False
+        
+        if not self.admin:
+            print("[错误] 此操作需要管理员权限，请以管理员身份重新运行程序")
+            print()
+            return False
+        
+        print()
+        print("请选择KMS激活选项:")
+        print("1. 自定义KMS激活 (输入KMS服务器地址)")
+        print("2. 取消")
+        print()
+        
+        try:
+            choice = input("请选择 (1-2): ").strip()
+        except:
+            choice = '2'
+        
+        if choice == '1':
+            return self.custom_kms_activation()
+        else:
+            print("取消KMS激活")
+            return False
+    
+    def custom_kms_activation(self):
+        """自定义KMS激活"""
+        print()
+        print("请输入KMS服务器地址 (例如: kms.example.com)")
+        print("或直接按Enter取消")
+        print()
+        
+        try:
+            kms_server = input("KMS服务器: ").strip()
+        except:
+            kms_server = ""
+        
+        if not kms_server:
+            print("取消KMS激活")
+            return False
+        
+        # 验证服务器格式
+        if not re.match(r'^[a-zA-Z0-9.-]+$', kms_server):
+            print("[错误] 服务器地址格式不正确")
+            return False
+        
+        print()
+        print(f"使用KMS服务器: {kms_server}")
+        print("正在设置KMS服务器...")
+        
+        # 设置KMS服务器
+        result = self.run_slmgr_command(f"/skms {kms_server}", False)
+        
+        print("正在尝试激活...")
+        activate_result = self.run_slmgr_command("/ato", False)
+        
+        if "成功" in activate_result or "successfully" in activate_result.lower() or "已激活" in activate_result:
+            print("[成功] KMS激活成功")
+            return True
+        else:
+            print(f"[错误] KMS激活失败: {activate_result}")
+            return False
+    
+    def reset_windows_activation(self):
+        """重置Windows激活状态"""
+        print("[重置Windows激活状态]")
+        print()
+        
+        if not self.admin:
+            print("[错误] 此操作需要管理员权限，请以管理员身份重新运行程序")
+            print()
+            return False
+        
+        print("警告: 此操作将重置Windows激活状态")
+        print("这包括:")
+        print("1. 卸载当前产品密钥")
+        print("2. 清除KMS服务器设置") 
+        print("3. 重置授权状态")
+        print("4. 清除激活缓存")
+        print()
+        print("重置后，您需要重新激活Windows")
+        print()
+        
+        try:
+            confirm = input("确认要重置Windows激活状态吗? (y/N): ").strip().lower()
+        except:
+            confirm = 'n'
+            
+        if confirm != 'y':
+            print("取消重置")
+            return False
+        
+        print()
+        print("正在重置Windows激活状态...")
+        
+        # 1. 卸载产品密钥
+        print("1. 卸载产品密钥...")
+        result = self.run_slmgr_command("/upk", False)
+        if "成功" in result or "successfully" in result.lower():
+            print("  [成功] 产品密钥已卸载")
+        else:
+            print("  [警告] 卸载产品密钥时可能出错")
+        
+        # 2. 清除KMS服务器设置
+        print("2. 清除KMS服务器设置...")
+        result = self.run_slmgr_command("/ckms", False)
+        if "成功" in result or "successfully" in result.lower():
+            print("  [成功] KMS服务器设置已清除")
+        else:
+            print("  [警告] 清除KMS服务器设置时可能出错")
+        
+        # 3. 清除注册表中的产品密钥
+        print("3. 清除注册表中的产品密钥...")
+        result = self.run_slmgr_command("/cpky", False)
+        if "成功" in result or "successfully" in result.lower():
+            print("  [成功] 注册表中的产品密钥已清除")
+        else:
+            print("  [警告] 清除注册表中的产品密钥时可能出错")
+        
+        # 4. 重置授权状态
+        print("4. 重置授权状态...")
+        result = self.run_slmgr_command("/rearm", False)
+        if "成功" in result or "successfully" in result.lower():
+            print("  [成功] 授权状态已重置")
+        else:
+            print("  [警告] 重置授权状态时可能出错")
+        
+        print()
+        print("[成功] Windows激活状态已重置")
+        print("注意: 您需要重新激活Windows才能使用所有功能")
+        print("建议重启计算机以确保所有更改生效")
+        
+        return True
+    
+    def show_reset_options(self):
+        """显示重置选项菜单"""
+        print("[重置选项]")
+        print()
+        print("请选择重置选项:")
+        print("1. 完全重置激活状态 (推荐)")
+        print("2. 仅卸载产品密钥")
+        print("3. 仅清除KMS服务器设置")
+        print("4. 仅重置授权状态")
+        print("5. 取消")
+        print()
+        
+        try:
+            choice = input("请选择 (1-5): ").strip()
+        except:
+            choice = '5'
+        
+        if choice == '1':
+            return self.reset_windows_activation()
+        elif choice == '2':
+            return self.reset_product_key_only()
+        elif choice == '3':
+            return self.reset_kms_only()
+        elif choice == '4':
+            return self.reset_license_only()
+        else:
+            print("取消重置")
+            return False
+    
+    def reset_product_key_only(self):
+        """仅卸载产品密钥"""
+        print("[仅卸载产品密钥]")
+        
+        if not self.admin:
+            print("[错误] 此操作需要管理员权限")
+            return False
+        
+        print("正在卸载产品密钥...")
+        result = self.run_slmgr_command("/upk", False)
+        
+        if "成功" in result or "successfully" in result.lower():
+            print("[成功] 产品密钥已卸载")
+            return True
+        else:
+            print(f"[错误] 卸载产品密钥失败: {result}")
+            return False
+    
+    def reset_kms_only(self):
+        """仅清除KMS服务器设置"""
+        print("[仅清除KMS服务器设置]")
+        
+        if not self.admin:
+            print("[错误] 此操作需要管理员权限")
+            return False
+        
+        print("正在清除KMS服务器设置...")
+        result = self.run_slmgr_command("/ckms", False)
+        
+        if "成功" in result or "successfully" in result.lower():
+            print("[成功] KMS服务器设置已清除")
+            return True
+        else:
+            print(f"[错误] 清除KMS服务器设置失败: {result}")
+            return False
+    
+    def reset_license_only(self):
+        """仅重置授权状态"""
+        print("[仅重置授权状态]")
+        
+        if not self.admin:
+            print("[错误] 此操作需要管理员权限")
+            return False
+        
+        print("正在重置授权状态...")
+        result = self.run_slmgr_command("/rearm", False)
+        
+        if "成功" in result or "successfully" in result.lower():
+            print("[成功] 授权状态已重置")
+            print("注意: 此操作会消耗一次重置次数，通常有次数限制")
+            return True
+        else:
+            print(f"[错误] 重置授权状态失败: {result}")
+            return False
+    
+    def show_menu(self):
+        """显示菜单"""
+        print("请选择操作:")
+        print("1. 检测激活状态")
+        print("2. 显示产品密钥")
+        print("3. 安装产品密钥")
+        print("4. 激活Windows")
+        print("5. KMS激活")
+        print("6. 查询OEM信息")
+        print("7. 重置激活状态")
+        print("8. 退出程序")
+        print()
+    
+    def wait_for_enter(self):
+        """等待用户按Enter键"""
+        print()
+        try:
+            input("按Enter键继续...")
+        except:
+            print("输入错误，继续执行...")
+            time.sleep(2)
+    
+    def main_loop(self):
+        """主循环"""
+        while self.running:
+            try:
+                self.print_header()
+                self.show_menu()
+                
+                choice = input("请输入选项 (1-8): ").strip()
+                
+                if choice == '1':
+                    self.print_header()
+                    self.check_activation_status()
+                    self.wait_for_enter()
+                elif choice == '2':
+                    self.print_header()
+                    self.show_installed_product_keys()
+                    self.wait_for_enter()
+                elif choice == '3':
+                    self.print_header()
+                    if self.install_product_key():
+                        time.sleep(2)
+                        self.print_header()
+                        self.check_activation_status()
+                    self.wait_for_enter()
+                elif choice == '4':
+                    self.print_header()
+                    if self.activate_windows():
+                        time.sleep(2)
+                        self.print_header()
+                        self.check_activation_status()
+                    self.wait_for_enter()
+                elif choice == '5':
+                    self.print_header()
+                    if self.kms_activation():
+                        time.sleep(2)
+                        self.print_header()
+                        self.check_activation_status()
+                    self.wait_for_enter()
+                elif choice == '6':
+                    self.print_header()
+                    self.get_oem_info()
+                    self.wait_for_enter()
+                elif choice == '7':
+                    self.print_header()
+                    if self.show_reset_options():
+                        time.sleep(2)
+                        self.print_header()
+                        self.check_activation_status()
+                    self.wait_for_enter()
+                elif choice == '8':
+                    print("按下Enter会自动退出")
+                    self.running = False
+                else:
+                    print("无效选项，请重新输入")
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                print("\n\n程序被用户中断")
+                self.running = False
+            except Exception as e:
+                print(f"\n程序执行出错: {str(e)}")
+                self.wait_for_enter()
+
+def main():
+    """主函数"""
+    try:
+        manager = WindowsActivationManager()
+        manager.main_loop()
+    except Exception as e:
+        print(f"程序执行出错: {str(e)}")
+    finally:
+        try:
+            input("\n按Enter键退出...")
+        except:
+            pass
+
+if __name__ == "__main__":
+    main()
