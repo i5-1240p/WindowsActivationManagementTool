@@ -131,3 +131,4 @@ WindowsActivationManager/
 
 防病毒软件是否拦截
 注意：请合法使用本工具，遵守软件许可协议和相关法律法规。
+增加官网网址：https://wamt.a770win11.xyz/
